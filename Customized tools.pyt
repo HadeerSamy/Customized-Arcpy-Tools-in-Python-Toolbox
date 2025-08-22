@@ -107,15 +107,15 @@ class GDB_Metadata(object):
         param1 = arcpy.Parameter(
             displayName="Output Table",
             name="outputTable",
-            datatype="GPString",
+            datatype="DETable",
             parameterType="Required",
-            direction="Input")
+            direction="Output")
 
 
         params = [param0, param1]
         return params
 
-    def insertingRows(featuresArray, createdTable, tableFields, datasetName):
+    def insertingRows(self, featuresArray, createdTable, tableFields, datasetName):
         if (featuresArray == None):
             pass
         else:
@@ -159,6 +159,8 @@ class GDB_Metadata(object):
             
                 try:
                     featureDescription = md.Metadata(featureName).description
+                    if featureDescription:
+                        featureDescription = re.sub(r'<[^>]*>', '', featureDescription)
                     if featureDescription != None and len(featureDescription) > 255:
                         featureDescription = featureTags[:255]
                 except RuntimeError:
@@ -176,15 +178,16 @@ class GDB_Metadata(object):
         outputTable = parameters[1].valueAsText
         arcpy.env.workspace = Geodatabase
 
-        createdTable = arcpy.management.CreateTable(Geodatabase, outputTable)
-        fieldss = ["featureDataset", "featureClass", "GeometryType", "Credits", "Title", "Tags", "Summary", "Desscription" ]
+        arcpy.management.CreateTable(os.path.dirname(outputTable), os.path.basename(outputTable))
 
-        for k in range(len(fieldss)):
-            arcpy.management.AddField(createdTable, fieldss[k], "TEXT")
+        fields = ["featureDataset", "featureClass", "GeometryType", "Credits", "Title", "Tags", "Summary", "Description" ]
+
+        for k in range(len(fields)):
+            arcpy.management.AddField(outputTable, fields[k], "TEXT")
 
         # Get a list of all feature datasets in the GDB
         feature_datasets = arcpy.ListDatasets()
-        print(feature_datasets)
+
         for i in range(len(feature_datasets)):
 
             datasetName = feature_datasets[i]
@@ -193,13 +196,12 @@ class GDB_Metadata(object):
             
             featureLayers = arcpy.ListFeatureClasses("*", "All", datasetName)
 
-            self.insertingRows(featureLayers, createdTable, fieldss, datasetName)
+            self.insertingRows(featureLayers, outputTable, fields, datasetName)
 
 
         aloneFeatureLayers = arcpy.ListFeatureClasses("*","All",None)
 
-        print(aloneFeatureLayers)
-        self.insertingRows(aloneFeatureLayers, createdTable, fieldss)
+        self.insertingRows(aloneFeatureLayers, outputTable, fields,"NO Dataset")
 
     def postExecute(self, parameters):
         """This method takes place after outputs are processed and
@@ -310,5 +312,6 @@ class deleteRandomPoints(object):
     
 
     #This script is written by Hadeer Samy 
+
 
     # hadeersamy730@gmail.com
