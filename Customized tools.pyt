@@ -11,7 +11,7 @@ class Toolbox(object):
         self.alias = "toolbox"
 
         # List of tool classes associated with this toolbox
-        self.tools = [CopySubtype, GDB_Metadata, deleteRandomPoints]
+        self.tools = [CopySubtype, GDB_Metadata, deleteRandomPoints,upstreamCatchments]
 
 
 class CopySubtype(object):
@@ -311,7 +311,213 @@ class deleteRandomPoints(object):
         return
     
 
-    #This script is written by Hadeer Samy 
 
 
-    # hadeersamy730@gmail.com
+
+class upstreamCatchments(object):
+    def __init__(self):
+        """Define the tool (tool name is the name of the class)."""
+        self.label = "upstream Catchments"
+        self.description = "Defines all the updtream catchments of manholes"
+        self.canRunInBackground = False
+
+    def getParameterInfo(self):
+        """Define parameter definitions"""
+        param0 = arcpy.Parameter(
+            displayName="Manholes",
+            name="manholes",
+            datatype=["DEFeatureClass", "GPFeatureLayer"],
+            parameterType="Required",
+            direction="Input")
+        
+        param1 = arcpy.Parameter(
+            displayName="Manhole ID",
+            name="Manhole_ID",
+            datatype="Field",
+            parameterType="Required",
+            direction="Input")
+        
+        param2 = arcpy.Parameter(
+            displayName="Conduits/Pipes",
+            name="Conduits",
+            datatype=["DEFeatureClass", "GPFeatureLayer"],
+            parameterType="Required",
+            direction="Input")
+
+        param3 = arcpy.Parameter(
+            displayName="upstream Node",
+            name="upstreamNode",
+            datatype="Field",
+            parameterType="Required",
+            direction="Input")   
+
+        param4 =arcpy.Parameter(
+            displayName="downstream Node",
+            name="downstreamNode",
+            datatype="Field",
+            parameterType="Required",
+            direction="Input")  
+        
+        param5 = arcpy.Parameter(
+            displayName="Catchments",
+            name="Catchments",
+            datatype=["DEFeatureClass", "GPFeatureLayer"],
+            parameterType="Required",
+            direction="Input")
+        
+        param6 = arcpy.Parameter(
+            displayName="Catchments Name",
+            name="catchmentName",
+            datatype="Field",
+            parameterType="Required",
+            direction="Input")
+        
+
+        param7 = arcpy.Parameter(
+            displayName="Output Feature",
+            name="out_features",
+            datatype=["DEFeatureClass"],
+            parameterType="Required",
+            direction="Output")
+
+
+        # param0.filter.list = ["Point"]
+        # param2.filter.list = ["Line"]
+        # param5.filter.list = ["Polygon"]
+
+
+        param1.parameterDependencies = [param0.name]
+        param3.parameterDependencies = [param2.name]
+        param4.parameterDependencies = [param2.name]
+        param6.parameterDependencies = [param5.name]
+
+
+        params = [param0, param1, param2, param3, param4, param5, param6,param7]
+        return params
+
+    def isLicensed(self):
+        """Set whether tool is licensed to execute."""
+        return True
+
+    def updateParameters(self, parameters):
+        """Modify the values and properties of parameters before internal
+        validation is performed.  This method is called whenever a parameter
+        has been changed."""
+        return
+
+    def updateMessages(self, parameters):
+        if parameters[0].value:
+            desc = arcpy.Describe(parameters[0].value)
+            if desc.shapeType != "Point":
+                parameters[0].setErrorMessage("Only point features are allowed.")
+        
+        if parameters[2].value:
+            desc = arcpy.Describe(parameters[2].value)
+            if desc.shapeType != "Polyline":
+                parameters[2].setErrorMessage("Only Polyline features are allowed.")
+
+        if parameters[5].value:
+            desc = arcpy.Describe(parameters[5].value)
+            if desc.shapeType != "Polygon":
+                parameters[5].setErrorMessage("Only polygon features are allowed.")
+
+    def execute(self, parameters, messages):
+        manholes = parameters[0].valueAsText
+        manholesID = parameters[1].valueAsText
+        pipes = parameters[2].valueAsText
+        upstreamNode = parameters[3].valueAsText
+        downstreamNode = parameters[4].valueAsText
+        catchment = parameters[5].valueAsText
+        catchmentName = parameters[6].valueAsText
+        manholesFinalized = parameters[7].valueAsText
+
+        
+        arcpy.env.workspace = "in_memory"
+        tempJoin = "manholes_joined"
+
+        arcpy.analysis.SpatialJoin(manholes, 
+                                catchment, 
+                                tempJoin, 
+                                "JOIN_ONE_TO_MANY", 
+                                "KEEP_ALL", 
+                                None, 
+                                "INTERSECT")
+
+        arcpy.management.DeleteIdentical(tempJoin, [manholesID,catchmentName])
+
+        arcpy.management.Dissolve(tempJoin, 
+                                manholesFinalized, 
+                                manholesID, 
+                                [[catchmentName, "CONCATENATE"]], 
+                                "MULTI_PART", 
+                                "DISSOLVE_LINES", 
+                                " *-+ ")
+
+        arcpy.management.Delete(tempJoin)
+
+        G = nx.DiGraph()
+        
+        #building the network
+
+        with arcpy.da.SearchCursor(pipes, [upstreamNode, downstreamNode]) as cursor:
+
+            for up, down in cursor:
+
+                if up and down:
+
+                    G.add_edge(up, down)
+                    
+                    
+        arcpy.management.AddField(manholesFinalized, 
+                                "All_Catchments", 
+                                "TEXT", 
+                                None, 
+                                None, 
+                                1000)
+                    
+                    
+        with arcpy.da.UpdateCursor(manholesFinalized, [manholesID,"All_Catchments"]) as Manholecursor:
+
+            for mn in Manholecursor:
+
+                if mn[0] in G:
+                    upstream_nodes = nx.ancestors(G, mn[0])
+                    upstream_nodes.add(mn[0])
+                else:
+                    upstream_nodes = {mn[0]}
+        
+        
+        
+                catchment = set()
+
+                #bmsk kol node mn elly 2blo w aktb l catchments beto3ha gowa set 34an myb2a4 feeh duplications
+
+                for i in upstream_nodes:
+        
+                    with arcpy.da.SearchCursor(manholesFinalized, [f"CONCATENATE_{catchmentName}"], where_clause=f"{manholesID} = '{i}'") as cursor:
+
+                        for row in cursor:
+        
+                            parts = row[0].split(" *-+ ")
+
+                            catchment.update(parts)
+        
+                print(catchment)
+
+                mn[1] = " , ".join(catchment)
+
+                Manholecursor.updateRow(mn)           
+
+   
+
+
+    def postExecute(self, parameters):
+        """This method takes place after outputs are processed and
+        added to the display."""
+        return
+
+
+#This script is written by Hadeer Samy 
+
+# hadeersamy730@gmail.com
+
