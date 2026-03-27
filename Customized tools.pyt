@@ -11,7 +11,126 @@ class Toolbox(object):
         self.alias = "toolbox"
 
         # List of tool classes associated with this toolbox
-        self.tools = [CopySubtype, GDB_Metadata, deleteRandomPoints,upstreamCatchments]
+        self.tools = [MergeWithLargest_V2, CopySubtype, GDB_Metadata, deleteRandomPoints,upstreamCatchments]
+
+class MergeWithLargest_V2(object):
+    def __init__(self):
+        """Define the tool (tool name is the name of the class)."""
+        self.label = "Merging Overlapped parts with the largest"
+        self.description = "This tool create a topology of overlapping features within the same layer and merge each part with the largest one"
+        self.canRunInBackground = False
+
+    def getParameterInfo(self):
+        """Define parameter definitions"""
+        param0 = arcpy.Parameter(
+            displayName="Overlapped Polygon Layer",
+            name="in_features",
+            datatype=["DEFeatureClass", "GPFeatureLayer"],
+            parameterType="Required",
+            direction="Input")
+        
+
+        param1 = arcpy.Parameter(
+            displayName="Fixed Polygon Layer",
+            name="out_features",
+            datatype=["DEFeatureClass"],
+            parameterType="Required",
+            direction="Output")
+    
+        params = [param0, param1]
+        return params
+
+    def isLicensed(self):
+        """Set whether tool is licensed to execute."""
+
+        level = arcpy.ProductInfo()
+
+        # Allow only Standard or Advanced in Pro as topology only is allowed in these two types of licenses
+        if level in ("Standard", "Advanced", "ArcInfo", "ArcEditor"):
+            return True
+        else:
+            return False
+
+    def updateParameters(self, parameters):
+        """Modify the values and properties of parameters before internal
+        validation is performed.  This method is called whenever a parameter
+        has been changed."""
+        return
+
+    def updateMessages(self, parameters):
+        if parameters[0].value:
+            desc = arcpy.Describe(parameters[0].value)
+            if desc.shapeType != "Polygon":
+                parameters[0].setErrorMessage("Only Polygons features are allowed.")
+
+
+    def execute(self, parameters, messages):
+        OverlappedPolygons = parameters[0].valueAsText
+        result = parameters[1].valueAsText
+
+
+        arcpy.env.addOutputsToMap = True
+        arcpy.env.overwriteOutput = True
+        max_oid = 0
+        desc = arcpy.Describe(OverlappedPolygons)
+        parent = os.path.dirname(desc.catalogPath)
+
+        if parent.lower().endswith(".gdb"):
+            arcpy.AddMessage("Not inside a feature dataset")
+        else:
+            arcpy.AddMessage("Inside feature dataset:"+ os.path.basename(parent))
+
+
+            # n3ml l topology
+            topo_name = f"testTopology"
+            createdTopology = arcpy.management.CreateTopology(parent, topo_name)[0]
+            arcpy.management.AddFeatureClassToTopology(createdTopology, OverlappedPolygons, 1, 1)
+            arcpy.management.AddRuleToTopology(createdTopology, "Must Not Overlap (Area)", OverlappedPolygons)
+            arcpy.management.ValidateTopology(createdTopology)
+            arcpy.management.ExportTopologyErrors(createdTopology, parent, f"TopoRes")
+
+            # ye4eel l points w l lines
+            arcpy.management.Delete(os.path.join(parent, f"TopoRes_line"))
+            arcpy.management.Delete(os.path.join(parent, f"TopoRes_point"))
+            arcpy.AddMessage(f"Exported topology errors ")
+
+            ErrorsLayer = os.path.join(parent, f"TopoRes_poly")
+            temp_ErasedPolygons = os.path.join(parent, f"ErasedPolygons")
+            arcpy.analysis.Erase(OverlappedPolygons, ErrorsLayer, temp_ErasedPolygons)
+            arcpy.AddMessage(f"Erased")
+
+
+
+            oid_field = arcpy.Describe(temp_ErasedPolygons).OIDFieldName
+
+            with arcpy.da.SearchCursor(OverlappedPolygons,[oid_field],sql_clause=(None, f"ORDER BY {oid_field} DESC")) as cursor:
+                max_oid = next(cursor)[0]
+
+
+            arcpy.management.Append(ErrorsLayer, temp_ErasedPolygons, "NO_TEST")
+            arcpy.AddMessage(f"Appended")
+            
+            ErasedPolygonsLayer = arcpy.management.MakeFeatureLayer(temp_ErasedPolygons, "out_layer")
+
+            arcpy.management.SelectLayerByAttribute(ErasedPolygonsLayer, "NEW_SELECTION", f"{oid_field}>{max_oid}")
+            arcpy.AddMessage(f"Selected")
+
+            arcpy.management.Eliminate(ErasedPolygonsLayer, result, "Area")
+
+            arcpy.management.Delete(ErrorsLayer)
+            arcpy.management.Delete(temp_ErasedPolygons)
+            arcpy.management.Delete(os.path.join(parent, f"testTopology"))
+
+
+
+
+
+
+    def postExecute(self, parameters):
+        """This method takes place after outputs are processed and
+        added to the display."""
+        return
+  
 
 
 class CopySubtype(object):
