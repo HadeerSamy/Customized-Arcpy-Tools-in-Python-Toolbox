@@ -11,7 +11,157 @@ class Toolbox(object):
         self.alias = "toolbox"
 
         # List of tool classes associated with this toolbox
-        self.tools = [MergeWithLargest_V2, CopySubtype, GDB_Metadata, deleteRandomPoints,upstreamCatchments]
+        self.tools = [colorByUniqueValues, MergeWithLargest_V2, CopySubtype, GDB_Metadata, deleteRandomPoints,upstreamCatchments]
+
+class colorByUniqueValues(object):
+    def __init__(self):
+        """Define the tool (tool name is the name of the class)."""
+        self.label = "color by unique values"
+        self.description = "This tool selects all the identical features in a layer"
+        self.canRunInBackground = False
+
+    def getParameterInfo(self):
+        """Define parameter definitions"""
+        param0 = arcpy.Parameter(
+            displayName="Input Layer",
+            name="in_features",
+            datatype=[ "GPFeatureLayer"],
+            parameterType="Required",
+            direction="Input")
+
+
+        param1 = arcpy.Parameter(
+            displayName="code Field in layer",
+            name="Layer_field",
+            datatype="Field",
+            parameterType="Required",
+            direction="Input")
+
+
+        param2 = arcpy.Parameter(
+            displayName="Input Table",
+            name="color_table",
+            datatype="DETable",
+            parameterType="Required",
+            direction="Input")
+
+        param3 = arcpy.Parameter(
+            displayName="Code Field in table",
+            name="table_field",
+            datatype="Field",
+            parameterType="Required",
+            direction="Input")
+
+        param4 = arcpy.Parameter(
+            displayName="Color Field in table",
+            name="table_field_color",
+            datatype="Field",
+            parameterType="Required",
+            direction="Input")
+
+  
+
+        param1.parameterDependencies = [param0.name]
+
+        param3.parameterDependencies = [param2.name]
+        param4.parameterDependencies = [param2.name]
+        
+        params = [param0, param1, param2,param3, param4]
+        return params
+
+    def isLicensed(self):
+        """Set whether tool is licensed to execute."""
+
+        return True
+
+
+    def updateParameters(self, parameters):
+        """Modify the values and properties of parameters before internal
+        validation is performed.  This method is called whenever a parameter
+        has been changed."""
+        return
+
+    def updateMessages(self, parameters):
+        return
+
+
+    def execute(self, parameters, messages):
+        layer_name = parameters[0].valueAsText
+        codeFieldLayer = parameters[1].valueAsText
+        inputTable = parameters[2].valueAsText
+        codeFieldTable = parameters[3].valueAsText
+        colorFieldTable = parameters[4].valueAsText
+
+
+        arcpy.env.addOutputsToMap = True
+        arcpy.env.overwriteOutput = True
+
+
+        coloDict = {}
+        #converth the table into a dictionary
+        with arcpy.da.SearchCursor(inputTable, [codeFieldTable, colorFieldTable]) as cursor:
+            for row in cursor:
+                coloDict[str(row[0])] = str(row[1].lstrip("#"))
+
+        aprx = arcpy.mp.ArcGISProject("CURRENT")
+        active_map = aprx.activeMap
+
+
+        target_layer = None
+        for lyr in active_map.listLayers():
+            if lyr.name == layer_name or lyr.longName == layer_name:
+                target_layer = lyr
+                break
+
+        if not target_layer:
+            # Fallback if accessed via full data path
+            for lyr in active_map.listLayers():
+                if lyr.isFeatureLayer and lyr.dataSource == layer_name:
+                    target_layer = lyr
+                    break
+
+        if not target_layer:
+            arcpy.AddError(f"Could not find layer '{layer_name}' in the active map.")
+            return
+
+        # 3. Access and configure symbology
+        sym = target_layer.symbology
+
+
+
+
+        if hasattr(sym, 'renderer'):
+            arcpy.AddMessage("it's a renderer")
+            if sym.renderer.type != "UniqueValueRenderer":
+                sym.updateRenderer('UniqueValueRenderer')
+            sym.renderer.fields = [codeFieldLayer]
+
+            for grp in sym.renderer.groups:
+                for itm in grp.items:
+                    val = itm.values[0][0]
+
+                    if val in coloDict:
+                        hexColor = coloDict[val]
+                        if len(hexColor) >= 6:
+                            r, g, b = (int(hexColor[i:i+2], 16) for i in (0, 2, 4))
+                            itm.symbol.color = {"RGB": [r, g, b, 255]}
+
+
+
+
+
+
+
+            target_layer.symbology = sym
+
+
+
+    def postExecute(self, parameters):
+        """This method takes place after outputs are processed and
+        added to the display."""
+        return
+    
+
 
 class MergeWithLargest_V2(object):
     def __init__(self):
